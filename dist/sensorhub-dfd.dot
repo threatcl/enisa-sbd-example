@@ -1,0 +1,51 @@
+digraph  {
+	subgraph cluster_s6 {
+		color="red";fontcolor="red";label="cloud_backend";style="dashed";
+		n11[fillcolor="#fffb9e",label="Audit Log",shape="cylinder",style="filled"];
+		n8[fillcolor="#9ed3ff",label="Dashboard API",shape="circle",style="filled"];
+		n7[fillcolor="#9ed3ff",label="Ingest API",shape="circle",style="filled"];
+		n9[fillcolor="#9ed3ff",label="Rollout Service",shape="circle",style="filled"];
+		n10[fillcolor="#fffb9e",label="Telemetry DB",shape="cylinder",style="filled"];
+		
+	}
+	subgraph cluster_s1 {
+		color="red";fontcolor="red";label="field_site";style="dashed";
+		n2[fillcolor="#ffd59e",label="Field Device",shape="diamond",style="filled"];
+		
+	}
+	subgraph cluster_s3 {
+		color="red";fontcolor="red";label="internet";style="dashed";
+		n5[fillcolor="#ffd59e",label="Admin",shape="diamond",style="filled"];
+		n4[fillcolor="#ffd59e",label="Operator",shape="diamond",style="filled"];
+		
+	}
+	subgraph cluster_s14 {
+		color="gray";fontcolor="gray";label="Protocols";style="dashed";
+		n16[height="0",label="legend_dst_0",shape="point",style="invis",width="0"];
+		n18[height="0",label="legend_dst_1",shape="point",style="invis",width="0"];
+		n20[height="0",label="legend_dst_2",shape="point",style="invis",width="0"];
+		n15[height="0",label="legend_src_0",shape="point",style="invis",width="0"];
+		n17[height="0",label="legend_src_1",shape="point",style="invis",width="0"];
+		n19[height="0",label="legend_src_2",shape="point",style="invis",width="0"];
+		n15->n16[color="#E69F00",fontcolor="#E69F00",label="https"];
+		n17->n18[color="#56B4E9",fontcolor="#56B4E9",label="mqtts"];
+		n19->n20[color="#009E73",fontcolor="#009E73",label="sql"];
+		
+	}
+	subgraph cluster_s12 {
+		color="red";fontcolor="red";label="third_party";style="dashed";
+		n13[fillcolor="#9ed3ff",label="Firmware CDN",shape="circle",style="filled"];
+		
+	}
+	label="SensorHub_sensorhub";labelloc="t";rankdir="LR";
+	n5->n9[color="#E69F00",fontcolor="#E69F00",label="firmware rollout (https)"];
+	n8->n10[color="#009E73",fontcolor="#009E73",label="telemetry read (sql)"];
+	n2->n7[color="#56B4E9",fontcolor="#56B4E9",label="telemetry publish (mqtts)"];
+	n2->n13[color="#E69F00",fontcolor="#E69F00",label="ota download (https)"];
+	n7->n10[color="#009E73",fontcolor="#009E73",label="telemetry write (sql)"];
+	n4->n8[color="#E69F00",fontcolor="#E69F00",label="fleet dashboard (https)"];
+	n9->n11[color="#009E73",fontcolor="#009E73",label="admin audit write (sql)"];
+	n9->n13[color="#E69F00",fontcolor="#E69F00",label="publish signed image (https)"];
+	
+}
+

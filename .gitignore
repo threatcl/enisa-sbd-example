@@ -1,0 +1,6 @@
+# dist/ is deliberately committed — the README renders the diagram, and CI
+# fails if it goes stale. Do not add it here.
+
+.DS_Store
+*.tar.gz
+threatcl

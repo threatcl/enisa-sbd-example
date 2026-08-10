@@ -1,0 +1,115 @@
+name: threat-model
+
+# ENISA Secure by Design and Default Playbook 01 asks for the threat model to
+# be reviewed at a release gate, and for CI output proving the negative tests
+# run. This workflow does the first half: it re-checks the model, enforces the
+# release gate as policy, and republishes the diagram as a build artifact.
+#
+# It runs on any pull request that touches the model or the policy, which is
+# also how ENISA's "refresh triggers" get their teeth — see README, gate 6.
+
+on:
+  pull_request:
+    paths:
+      - 'threatmodel/**'
+      - 'policy/**'
+      - '.github/workflows/threat-model.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned rather than 'latest' so a CLI release cannot change the meaning of
+  # a release gate underneath you. Bump deliberately.
+  THREATCL_VERSION: 0.6.5
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Graphviz renders the DFD. The threatcl binary shells out to it.
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      # Installed directly rather than via threatcl/threatcl-action because
+      # this workflow needs -invariants and -protocol-style, which the action
+      # does not currently expose. The checksum check is the point of the
+      # exercise, not ceremony: ENISA playbook 14 is supply chain controls.
+      - name: Install threatcl ${{ env.THREATCL_VERSION }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/threatcl/threatcl/releases/download/v${THREATCL_VERSION}"
+          ASSET="threatcl_${THREATCL_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -O "${BASE}/${ASSET}"
+          curl -fsSL -O "${BASE}/SHA256SUMS"
+          grep " ${ASSET}\$" SHA256SUMS | sha256sum -c -
+          tar xzf "${ASSET}"
+          sudo mv threatcl /usr/local/bin/
+          threatcl --version
+
+      # 1. Is the model still valid HCL against the spec?
+      - name: Validate threat model
+        run: threatcl validate threatmodel/*.hcl
+
+      # 2. The release gate itself. Each invariant is one ENISA checkbox.
+      #    A violation at severity "error" exits non-zero and fails the build.
+      - name: ENISA release gate
+        run: |
+          threatcl validate \
+            -invariants=policy/enisa-release-gate.hcl \
+            threatmodel/*.hcl
+
+      # 3. The committed diagram must match what the model produces now, so
+      #    the picture in the README cannot quietly drift from the model it
+      #    claims to describe. DOT is compared rather than PNG because it is
+      #    deterministic text; PNG bytes shift with the graphviz version.
+      - name: Check committed diagram is current
+        run: |
+          set -euo pipefail
+          threatcl dfd -format=dot -stdout -protocol-style=both \
+            threatmodel/sensorhub.tm.hcl > /tmp/sensorhub-dfd.dot
+          if ! diff -u dist/sensorhub-dfd.dot /tmp/sensorhub-dfd.dot; then
+            echo "::error::dist/ is stale — the diagram no longer matches the model. Run 'make dfd' and commit the result."
+            exit 1
+          fi
+
+      # 4. Regenerate the PNG and keep it as build evidence. ENISA minimum
+      #    evidence item 4 is "CI outputs"; this is the diagram half of it.
+      - name: Render diagram
+        run: |
+          threatcl dfd -out dist/sensorhub-dfd.png -overwrite \
+            -protocol-style=both threatmodel/sensorhub.tm.hcl
+
+      - name: Upload diagram as release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sensorhub-dfd
+          path: dist/
+
+  # ── Optional: push the model to Threatcl Cloud ───────────────────────────
+  # Disabled by default so this template runs with no configuration at all.
+  # Enable it if you want the org-level view: models across repos, a shared
+  # control library, and one risk matrix applied consistently — which is what
+  # ENISA means by a "documented method appropriate to the product", applied
+  # the same way by every team.
+  #
+  # Requires a THREATCL_API_TOKEN repository secret.
+  #
+  # cloud-push:
+  #   needs: release-gate
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Push to Threatcl Cloud
+  #       uses: threatcl/threatcl-action@v0.0.7
+  #       with:
+  #         command: 'cloud'
+  #         cloud-command: 'push'
+  #         cloud-token: ${{ secrets.THREATCL_API_TOKEN }}
+  #         files: './threatmodel/sensorhub.tm.hcl'
