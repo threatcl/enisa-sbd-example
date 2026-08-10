@@ -205,7 +205,7 @@ choose, the evidence it asks for is easier to produce continuously than to
 reconstruct in an audit.
 
 [enisa]: https://github.com/enisaeu/enisa-sbd-playbook
-[cli]: https://github.com/threatcl/threatcl
+[cli]: https://threatcl.dev/
 [spec]: https://github.com/threatcl/spec
 [action]: https://github.com/threatcl/threatcl-action
 [plugin]: https://github.com/threatcl/claude-plugin
