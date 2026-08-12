@@ -1,0 +1,51 @@
+name: threat-drift
+
+# ENISA Playbook 01, gate item 6, in the direction that is hard to automate.
+#
+# threat-model.yml runs when the model changes and re-checks it against the
+# release gate. This runs when the *code* changes and asks whether the model
+# should have changed with it — the new endpoint that shipped without anyone
+# opening the .tm.hcl. See README, "Gate item 6: refresh triggers".
+#
+# Configured in .threatcl-ci.hcl, which is also where the reasoning about
+# fail_mode lives: this one comments rather than blocking.
+
+on:
+  pull_request:
+
+# One review in flight per pull request. The review takes minutes of
+# inference, so without this a second push races the first for the same sticky
+# comment and the older commit's findings can win.
+concurrency:
+  group: threat-drift-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  drift:
+    # Pull requests from forks get a read-only token and no access to secrets,
+    # so the review could neither run inference nor post its comment. Skipping
+    # is quieter than a job that fails on every contribution — this repository
+    # is a template, so forks are the expected case rather than the exception.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # The diff itself comes from the compare API, but the review reads whole
+      # files out of the workspace for context, so the checkout stays.
+      - uses: actions/checkout@v7
+
+      # Pinned to an immutable commit rather than the @v0 alias, which is
+      # force-moved onto each release. This job holds an Anthropic key and a
+      # token that can write to pull requests; leaving the engine that reviews
+      # this repository changeable by a tag push would undo the same care the
+      # threatcl install in threat-model.yml takes with its checksum. ENISA
+      # playbook 14 is supply chain controls.
+      #
+      # Bump deliberately, as with THREATCL_VERSION.
+      - uses: threatcl/drift-action@26ad20c346058f85283822a4043f60e5ff59a6c2 # v0.1.1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
