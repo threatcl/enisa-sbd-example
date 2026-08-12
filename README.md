@@ -23,12 +23,12 @@ The entire threat model is [one HCL file](threatmodel/sensorhub.tm.hcl). The
 diagram below is generated from it. The release gate is
 [executable policy](policy/enisa-release-gate.hcl) that fails the build.
 
-The product is here too — three small Go services, one per process on the
-diagram. It exists because ENISA's evidence items are about a product: a model
-whose boundaries nothing actually crosses is asserting, not documenting. The
-code was written to the model rather than the other way round, so the
-boundaries in the picture are boundaries in the binary. See
-[The product](#the-product).
+The product is here too (But note, this isn't a REAL service) three small Go
+services, one per process on the diagram. It exists because ENISA's evidence
+items are about a product: a model whose boundaries nothing actually crosses is
+asserting, not documenting. The code was written to the model rather than the
+other way round, so the boundaries in the picture are boundaries in the binary.
+See [The product](#the-product).
 
 ![SensorHub data flow diagram](dist/sensorhub-dfd.png)
 
