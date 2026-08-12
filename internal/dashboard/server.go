@@ -9,9 +9,14 @@
 package dashboard
 
 import (
+	"bytes"
+	"context"
 	"encoding/csv"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -27,6 +32,10 @@ const (
 	// per device, so a large fleet cannot turn a single request into an
 	// unbounded response.
 	exportReadingsPerDevice = 500
+
+	// deliveryTimeout bounds one push of the export to a caller-nominated
+	// destination, so a slow endpoint cannot pin a handler open.
+	deliveryTimeout = 10 * time.Second
 )
 
 // Fleet views are readable by both roles. Admins are not implicitly operators
@@ -44,6 +53,7 @@ func Handler(st *store.Store, tokens *authn.Store, log *slog.Logger) *authz.Rout
 
 	r.HandleFunc("GET /api/fleet", fleetReaders, s.fleet)
 	r.HandleFunc("GET /api/fleet/export", fleetReaders, s.export)
+	r.HandleFunc("POST /api/fleet/export/deliver", fleetReaders, s.deliverExport)
 	r.HandleFunc("GET /api/devices/{id}/telemetry", fleetReaders, s.telemetry)
 	r.HandlePublic("GET /healthz", http.HandlerFunc(health))
 
@@ -107,31 +117,87 @@ func (s *service) export(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	devices, err := s.store.Fleet(scope)
-	if err != nil {
-		s.fail(w, r, "listing fleet for export", err)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="fleet-telemetry.csv"`)
 	w.Header().Set("Cache-Control", "no-store")
 
-	cw := csv.NewWriter(w)
-	defer cw.Flush()
+	if err := s.writeCSV(w, scope); err != nil {
+		// The 200 and the header rows are already on the wire, so there is no
+		// status left to change. Stop and log rather than trailing a truncated
+		// file that still looks like a complete one.
+		s.log.Error("export truncated", "path", r.URL.Path, "err", err)
+	}
+}
 
-	if err := cw.Write([]string{"device_id", "model", "metric", "value", "received_at"}); err != nil {
-		s.log.Error("writing export header", "err", err)
+// deliverExport POSTs the same CSV to a URL the caller nominates.
+//
+// Operators run the export on a schedule from their own reporting stack, and
+// asked to have it pushed rather than polled. The body is
+// {"url": "https://..."} and the request is the export, verbatim.
+func (s *service) deliverExport(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.scope(w, r)
+	if !ok {
 		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		authz.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"url\": \"https://...\"}"})
+		return
+	}
+	dest, err := url.Parse(req.URL)
+	if err != nil || dest.Scheme != "https" || dest.Host == "" {
+		authz.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "url must be absolute https"})
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := s.writeCSV(&buf, scope); err != nil {
+		s.fail(w, r, "building export for delivery", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), deliveryTimeout)
+	defer cancel()
+
+	post, err := http.NewRequestWithContext(ctx, http.MethodPost, dest.String(), &buf)
+	if err != nil {
+		s.fail(w, r, "building delivery request", err)
+		return
+	}
+	post.Header.Set("Content-Type", "text/csv; charset=utf-8")
+
+	resp, err := http.DefaultClient.Do(post)
+	if err != nil {
+		s.log.Error("export delivery failed", "host", dest.Host, "err", err)
+		authz.WriteJSON(w, http.StatusBadGateway, map[string]string{"error": "delivery failed"})
+		return
+	}
+	defer resp.Body.Close()
+
+	s.log.Info("export delivered", "host", dest.Host, "status", resp.StatusCode, "bytes", buf.Len())
+	authz.WriteJSON(w, http.StatusAccepted, map[string]any{"delivered_to": dest.Host, "status": resp.StatusCode})
+}
+
+// writeCSV renders the caller's fleet as CSV. Scoping is the same as every
+// other read in this service: the store will not answer without a tenant
+// scope, and the scope comes from the credential.
+func (s *service) writeCSV(w io.Writer, scope store.Scope) error {
+	devices, err := s.store.Fleet(scope)
+	if err != nil {
+		return err
+	}
+
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"device_id", "model", "metric", "value", "received_at"}); err != nil {
+		return err
 	}
 	for _, d := range devices {
 		readings, err := s.store.Readings(scope, d.ID, exportReadingsPerDevice)
 		if err != nil {
-			// The 200 and the header rows are already on the wire, so there is
-			// no status left to change. Stop and log rather than trailing a
-			// truncated file that still looks like a complete one.
-			s.log.Error("export truncated", "device", d.ID, "err", err)
-			return
+			return err
 		}
 		for _, reading := range readings {
 			row := []string{
@@ -142,11 +208,12 @@ func (s *service) export(w http.ResponseWriter, r *http.Request) {
 				reading.ReceivedAt.UTC().Format(time.RFC3339),
 			}
 			if err := cw.Write(row); err != nil {
-				s.log.Error("export truncated", "device", d.ID, "err", err)
-				return
+				return err
 			}
 		}
 	}
+	cw.Flush()
+	return cw.Error()
 }
 
 // csvSafe defuses spreadsheet formula injection.
