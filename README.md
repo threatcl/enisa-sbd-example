@@ -45,7 +45,7 @@ Playbook 01's release gate, quoted verbatim, against what produces it here.
 | Top threat scenarios reviewed; high risks have mitigations or documented exceptions | Six `threat` blocks, each with a `risk` block and a control | `high_risks_are_mitigated`. A high or critical threat with no implemented control exits non-zero. |
 | Secure defaults confirmed for new/exposed interfaces (deny by default, least privilege) | `control` blocks, each with an `owner` and `verification` attribute | `controls_have_owners` and `controls_map_to_verification`. |
 | Verification in place: at least one negative test per critical boundary / privileged path | `negative_test` attribute on each control, and the tests it names in [`tests/`](tests/) | `critical_paths_have_negative_tests` checks the attribute is there. [`scripts/negative-tests.sh`](scripts/negative-tests.sh) then reads the attribute and **runs the test it names**, so the string has to resolve to code that passes. |
-| Threat model refresh triggered if any of the following are relevant: new API/interface, auth model change, new sensitive data, major dependency/supplier change, OTA/update changes, major architecture change | The model lives in the repo, so every trigger is visible in a diff | [The workflow](.github/workflows/threat-model.yml) runs on any PR touching the model. See [Gate item 6](#gate-item-6-refresh-triggers) for the harder direction. |
+| Threat model refresh triggered if any of the following are relevant: new API/interface, auth model change, new sensitive data, major dependency/supplier change, OTA/update changes, major architecture change | The model lives in the repo, so every trigger is visible in a diff | [`threat-model.yml`](.github/workflows/threat-model.yml) re-runs the gate on any PR touching the model, and [`threat-drift.yml`](.github/workflows/threat-drift.yml) reviews the reverse direction — code changed, model did not. See [Gate item 6](#gate-item-6-refresh-triggers). |
 
 Eleven invariants, one per checkbox plus the sub-checks each one implies.
 
@@ -268,16 +268,27 @@ dependency change, an OTA change, or an architecture change.
 
 Every one of those is visible in a diff. Two directions, two mechanisms:
 
-- **Model changed, gate not re-run.** Handled here. The workflow triggers on
-  any pull request touching `threatmodel/` or `policy/`, so the gate re-runs
-  before the change can merge.
+- **Model changed, gate not re-run.** [`threat-model.yml`](.github/workflows/threat-model.yml)
+  triggers on any pull request touching `threatmodel/` or `policy/`, so the
+  gate re-runs before the change can merge.
 - **Code changed, model did not.** The harder and more common direction — the
-  new endpoint ships and nobody opens the `.tm.hcl`. That comparison is what
-  [`/threat-drift`][plugin] does: it reads recent code changes and reports what
-  the documented model no longer covers.
+  new endpoint ships and nobody opens the `.tm.hcl`. Now that there is a
+  product here to drift, [`threat-drift.yml`](.github/workflows/threat-drift.yml)
+  runs [drift-action][drift] on every pull request: it reads the diff against
+  the model and comments with what the model no longer covers, `file:line`
+  evidence included. Configured in [`.threatcl-ci.hcl`](.threatcl-ci.hcl).
+  [`/threat-drift`][plugin] is the same question asked locally, before you open
+  the PR.
 
-Neither is a substitute for judgement. Both remove the excuse that nobody
-noticed.
+The two are not symmetrical, and the config file says so at length. The gate is
+deterministic: eleven invariants, each a property of the model, each exiting
+non-zero. The drift review is a judgement about whether a diff outgrew its
+model, so it is set to `fail_mode = "never"` — it comments, it does not block.
+This repo already treats judgement as a warning rather than an error, which is
+why the threat-count check is `severity = "warning"`. One word in the config
+changes that if you disagree.
+
+Neither is a substitute for review. Both remove the excuse that nobody noticed.
 
 ## What is here
 
@@ -308,7 +319,9 @@ noticed.
 │  └─ negative-tests.sh         # runs the tests the model names, fails if they are missing
 ├─ .github/workflows/
 │  ├─ threat-model.yml          # validate → gate → staleness check → publish diagram
-│  └─ code.yml                  # build → vet → test → negative tests → publish evidence
+│  ├─ code.yml                  # build → vet → test → negative tests → publish evidence
+│  └─ threat-drift.yml          # the reverse check: did this diff outgrow the model?
+├─ .threatcl-ci.hcl             # drift-action config, and why it comments rather than blocks
 ├─ dist/
 │  ├─ sensorhub-dfd.png         # generated diagram (rendered above)
 │  └─ sensorhub-dfd.dot         # deterministic source, used for the staleness check
@@ -339,6 +352,7 @@ Worth knowing if you adapt it:
 - [ENISA Secure by Design and Default Playbook][enisa] - the source. Playbook 01 is [`01-trust-boundaries-and-threat-modelling.md`](https://github.com/enisaeu/enisa-sbd-playbook/blob/main/playbooks/01-trust-boundaries-and-threat-modelling.md)
 - [threatcl][cli] - the CLI. Threat modelling as HCL, in your repo
 - [threatcl spec][spec] - the schema these files are written against
+- [drift-action][drift] - the drift review that runs on pull requests here
 - [threatcl Claude plugin][plugin] - `/threat-drift`, `/threat-for-code`
 - [Threatcl Cloud][cloud] - the org layer: models across repos, a shared control library, and threat model status workflow
 
@@ -352,6 +366,7 @@ reconstruct in an audit.
 [cli]: https://threatcl.dev/
 [spec]: https://github.com/threatcl/spec
 [action]: https://github.com/threatcl/threatcl-action
+[drift]: https://github.com/threatcl/drift-action
 [plugin]: https://github.com/threatcl/claude-plugin
 [cloud]: https://threatcl.com/?utm_source=github&utm_medium=readme&utm_campaign=enisa-sbd
 [cra]: https://digital-strategy.ec.europa.eu/en/policies/cyber-resilience-act
