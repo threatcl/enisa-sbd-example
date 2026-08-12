@@ -1,0 +1,22 @@
+{
+  "devices": [
+    {
+      "id": "dev-northwind-001",
+      "org": "northwind",
+      "model": "SH-2",
+      "firmware_version": "1.4.0"
+    },
+    {
+      "id": "dev-northwind-002",
+      "org": "northwind",
+      "model": "SH-2",
+      "firmware_version": "1.4.0"
+    },
+    {
+      "id": "dev-contoso-001",
+      "org": "contoso",
+      "model": "SH-2-LR",
+      "firmware_version": "1.3.7"
+    }
+  ]
+}
