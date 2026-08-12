@@ -5,7 +5,9 @@ package tests
 import (
 	"bytes"
 	"encoding/csv"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -64,5 +66,40 @@ func TestFleetExportIsTenantScopedAndInjectionSafe(t *testing.T) {
 
 	if resp, _ := call(t, srv, http.MethodGet, "/api/fleet/export", "", nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("unauthenticated export = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestFleetExportDeliveryRejectsUnusableDestinations(t *testing.T) {
+	st := twoTenants(t)
+
+	var got []byte
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(sink.Close)
+
+	tokens := tokenStore(t, credential(operatorToken, "olive@northwind.example", northwind, authn.RoleOperator))
+	srv := serve(t, dashboard.Handler(st, tokens, discardLogger()))
+
+	// The handler only speaks https, so the plaintext test sink is refused
+	// before any telemetry is rendered.
+	resp, _ := call(t, srv, http.MethodPost, "/api/fleet/export/deliver", operatorToken, strings.NewReader(`{"url":"`+sink.URL+`"}`))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("plaintext destination = %d, want 400", resp.StatusCode)
+	}
+	if got != nil {
+		t.Fatalf("telemetry was sent to a plaintext destination:\n%s", got)
+	}
+
+	for _, bad := range []string{`{"url":"::"}`, `{"url":"/local/path"}`, `{"url":""}`, `not json`} {
+		resp, _ := call(t, srv, http.MethodPost, "/api/fleet/export/deliver", operatorToken, strings.NewReader(bad))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("destination %s = %d, want 400", bad, resp.StatusCode)
+		}
+	}
+
+	if resp, _ := call(t, srv, http.MethodPost, "/api/fleet/export/deliver", "", strings.NewReader(`{"url":"https://example.test/"}`)); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauthenticated delivery = %d, want 401", resp.StatusCode)
 	}
 }
