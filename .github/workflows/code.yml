@@ -1,0 +1,78 @@
+name: code
+
+# The threat-model workflow checks the model against ENISA's release gate.
+# This one checks the product against the model: it builds and tests the
+# service, then runs exactly the negative tests the model names, and keeps
+# their output as evidence.
+#
+# Unfiltered triggers on purpose. A code change with no model change is the
+# case gate item 6 is about, and a model change that renames a negative test
+# has to be caught by the same run.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - run: go build ./...
+      - run: go vet ./...
+
+      # -race because the ingest server runs a goroutine per device connection
+      # and the store is shared across all of them.
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  negative-tests:
+    # ENISA Playbook 01 gate item 5, and minimum evidence item 4: "CI outputs
+    # or test results for key negative tests (unauthorised calls fail)".
+    #
+    # The list of tests is not written here. It is read out of the model's
+    # negative_test attributes, so this job fails if the model names a test
+    # that no longer exists - drift in the direction CI usually misses.
+    runs-on: ubuntu-latest
+    env:
+      # Keep in step with .github/workflows/threat-model.yml.
+      THREATCL_VERSION: 0.6.5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install threatcl ${{ env.THREATCL_VERSION }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/threatcl/threatcl/releases/download/v${THREATCL_VERSION}"
+          ASSET="threatcl_${THREATCL_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -O "${BASE}/${ASSET}"
+          curl -fsSL -O "${BASE}/SHA256SUMS"
+          grep " ${ASSET}\$" SHA256SUMS | sha256sum -c -
+          tar xzf "${ASSET}"
+          sudo mv threatcl /usr/local/bin/
+          threatcl --version
+
+      - name: Run the negative tests the model names
+        run: scripts/negative-tests.sh
+
+      - name: Upload negative test output as release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: negative-test-evidence
+          path: evidence/
+          if-no-files-found: warn
