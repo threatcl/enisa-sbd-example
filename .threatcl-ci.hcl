@@ -48,3 +48,7 @@ fail_mode = "never"
 # defaults are compiled into the action, and the workflow pins the action by
 # commit, so pinning them again here would mean a future release could not
 # improve them without someone remembering to edit this file.
+
+llm {
+  provider = "openai"
+}

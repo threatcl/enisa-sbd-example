@@ -38,14 +38,14 @@ jobs:
       # files out of the workspace for context, so the checkout stays.
       - uses: actions/checkout@v7
 
-      # Pinned to an immutable commit rather than the @v0 alias, which is
-      # force-moved onto each release. This job holds an Anthropic key and a
+      # Pinned to an immutable commit rather than the @v1 alias, which is
+      # force-moved onto each release. This job holds an OpenAI key and a
       # token that can write to pull requests; leaving the engine that reviews
       # this repository changeable by a tag push would undo the same care the
       # threatcl install in threat-model.yml takes with its checksum. ENISA
       # playbook 14 is supply chain controls.
       #
       # Bump deliberately, as with THREATCL_VERSION.
-      - uses: threatcl/drift-action@26ad20c346058f85283822a4043f60e5ff59a6c2 # v0.1.1
+      - uses: threatcl/drift-action@ca722d44fc637e68638c22dcfa8c42679d8ae931 # v1.0.0
         with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
